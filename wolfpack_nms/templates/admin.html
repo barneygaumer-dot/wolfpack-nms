@@ -1,0 +1,62 @@
+{% extends "base.html" %}{% block body %}<div class=grid><div class=card><h2>Admin / Setup</h2><form method=post>
+<div class=field><label>Site Name</label><input name=site_name value="{{settings.get('site_name','Home / Lab')}}"></div>
+<div class=field><label>Default CIDR</label><input name=default_cidr value="{{settings.get('default_cidr','10.23.10.0/24')}}"></div>
+
+<h3>Polling</h3>
+
+<div class=field>
+<label>Polling Enabled</label>
+<input type=checkbox name=poll_enabled value=1
+ {{'checked' if settings.get('poll_enabled','1')=='1'}}>
+</div>
+
+<div class=field>
+<label>Poll Interval (sec)</label>
+<input type=number name=poll_seconds min=30 step=1
+ value="{{settings.get('poll_seconds','300')}}">
+</div>
+
+<div class=field>
+<label>ICMP Polling</label>
+<input type=checkbox name=poll_icmp value=1
+ {{'checked' if settings.get('poll_icmp','1')=='1'}}>
+</div>
+
+<div class=field>
+<label>SNMP Polling</label>
+<input type=checkbox name=poll_snmp value=1
+ {{'checked' if settings.get('poll_snmp','1')=='1'}}>
+</div>
+
+<div class=field>
+<label>Synthetic Checks</label>
+<input type=checkbox name=poll_synthetics value=1
+ {{'checked' if settings.get('poll_synthetics','1')=='1'}}>
+</div>
+
+<p class=small>
+Routine health polling only. L2/L3 topology discovery remains operator initiated.
+</p>
+
+<h3>Email Alerting — v1</h3>
+<div class=field><label>Alert Group Name</label><input name=alert_group_name value="{{settings.get('alert_group_name','NOC')}}"></div>
+<div class=field><label>Alert Group Enabled</label><input type=checkbox name=alert_group_enabled value=1 {{'checked' if settings.get('alert_group_enabled','1')=='1'}}></div>
+<div class=field><label>Recipients</label><input name=alert_recipients value="{{settings.get('alert_recipients','')}}" placeholder="you@example.com, noc@example.com"></div>
+<div class=field><label>SMTP Host</label><input name=smtp_host value="{{settings.get('smtp_host','')}}" placeholder="mail.smtp2go.com"></div>
+<div class=field><label>SMTP Port</label><input type=number name=smtp_port value="{{settings.get('smtp_port','587')}}"></div>
+<div class=field><label>STARTTLS</label><input type=checkbox name=smtp_starttls value=1 {{'checked' if settings.get('smtp_starttls','1')=='1'}}></div>
+<div class=field><label>SMTP Username</label><input name=smtp_username value="{{settings.get('smtp_username','')}}"></div>
+<div class=field><label>SMTP Password</label><input type=password name=smtp_password value="{{settings.get('smtp_password','')}}"></div>
+<div class=field><label>From Name</label><input name=smtp_from_name value="{{settings.get('smtp_from_name','WolfPack NMS')}}"></div>
+<div class=field><label>From Address</label><input name=smtp_from value="{{settings.get('smtp_from','')}}" placeholder="wolfpack-nms@example.com"></div>
+<p class=small>SMTP providers may require the From address/domain to be verified. DOWN/CLEAR notifications are sent only on state transitions.</p>
+
+<button>Save Settings</button></form>
+<form method=post action="/admin/test-email" style="margin-top:10px"><button>📧 Send Test Email</button></form></div>
+<div class=card><h2>System</h2><p>Version: <b>{{settings.get('version')}}</b></p><p>Local Collector: <span class=PASS>ENABLED</span></p><p>Database: SQLite</p><p class=small>Web ZIP updater, remote collectors, credential vault, backup/restore controls are staged for subsequent builds.</p></div>
+<div class=card><h2>Update From ZIP</h2>
+<p class=small>Upload a WolfPack NMS release. The external lifecycle installer runs as an independent systemd transient unit and performs preflight, backup, install, restart, version/health validation and rollback.</p>
+<form method=post action="/admin/update" enctype="multipart/form-data">
+<input type=file name=update_zip accept=".zip" required><button>⬆ Install Update</button>
+</form><p class=small>Update log: <code>/opt/wolfpack/update-staging/update.log</code></p></div>
+</div>{% endblock %}

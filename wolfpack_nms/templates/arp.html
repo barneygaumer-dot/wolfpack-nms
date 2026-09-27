@@ -1,0 +1,7 @@
+{% extends "base.html" %}{% block body %}
+<div class=card><h2>ARP Evidence</h2>
+<p class=small>Observed IP→MAC relationships learned from authenticated L3 devices. ARP-only discoveries enter inventory as OBSERVED until independently verified.</p>
+<table><tr><th>Observer</th><th>Neighbor IP</th><th>MAC</th><th>Interface</th><th>Age</th><th>Last Seen</th></tr>
+{% for a in rows %}<tr><td><a href="/device/{{a.observer_device_id}}">{{a.observer_name}}</a></td>
+<td>{{a.ip}}</td><td>{{a.mac or ""}}</td><td>{{a.interface or ""}}</td><td>{{a.age or ""}}</td><td>{{a.last_seen}}</td></tr>
+{% endfor %}</table></div>{% endblock %}

@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block body %}
+
+<div class="card">
+  <h2>Agentless Discovery</h2>
+
+  <form method="post" action="/discover">
+    <input name="cidr"
+           placeholder="10.23.10.0/24"
+           required>
+    <button>🔎 Discover</button>
+  </form>
+
+  <p class="small">
+    Discover devices and endpoints for inventory, monitoring,
+    classification, and configuration.
+  </p>
+</div>
+
+
+<div class="card">
+  <h2>Discovered Devices</h2>
+
+  <table>
+    <tr>
+      <th>Node</th>
+      <th>IP</th>
+      <th>Type</th>
+      <th>Status</th>
+      <th>Latency</th>
+      <th>Location</th>
+    </tr>
+
+    {% for d in devices %}
+    <tr>
+      <td>
+        <a href="/device/{{d.id}}">
+          {{d.display_name or d.hostname or d.ip}}
+        </a>
+      </td>
+
+      <td>{{d.ip}}</td>
+
+      <td>
+        {{d.device_type or ""}}
+      </td>
+
+      <td class="{{d.status}}">
+        {{d.status}}
+      </td>
+
+      <td>
+        {%- if d.latency_ms is not none -%}
+          {{ "%.1f ms"|format(d.latency_ms) }}
+        {%- endif -%}
+      </td>
+
+      <td>{{d.location or ""}}</td>
+    </tr>
+
+    {% else %}
+
+    <tr>
+      <td colspan="6" class="small">
+        No devices discovered.
+      </td>
+    </tr>
+
+    {% endfor %}
+  </table>
+</div>
+
+{% endblock %}

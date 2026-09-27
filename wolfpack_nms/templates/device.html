@@ -1,0 +1,90 @@
+{% extends "base.html" %}{% block body %}<div class=card><h2>Node Configuration — {{d.display_name or d.hostname or d.ip}}</h2><p><b>IP:</b> {{d.ip}} &nbsp; <b>Status:</b> <span class={{d.status}}>{{d.status}}</span></p>
+<form method=post>
+{% for n,l in [('display_name','Display Name'),('hostname','Host Name'),('description','Description'),('device_type','Device Type')] %}<div class=field><label>{{l}}</label><input name={{n}} value="{{d[n] or ''}}"></div>{% endfor %}
+<div class=field><label>Platform / Class</label><select name=platform_class>
+<option value="" {{'selected' if not d.platform_class}}>Auto / Unknown</option>
+<option value="windows" {{'selected' if d.platform_class=='windows'}}>Windows</option>
+<option value="nix" {{'selected' if d.platform_class=='nix'}}>Linux / Unix</option>
+<option value="iot" {{'selected' if d.platform_class=='iot'}}>IoT</option>
+<option value="network" {{'selected' if d.platform_class=='network'}}>Network Device</option>
+</select></div>
+{% for n,l in [('location','Location'),('vendor','Vendor'),('model','Model')] %}<div class=field><label>{{l}}</label><input name={{n}} value="{{d[n] or ''}}"></div>{% endfor %}
+<h3>SNMP</h3><div class=field><label>Version</label><select name=snmp_version>{% for v in ['v1','v2c','v3'] %}<option {{'selected' if d.snmp_version==v}}>{{v}}</option>{% endfor %}</select></div>
+<div class=field><label>Community / String</label><input name=snmp_community value="{{d.snmp_community or ''}}" type=password></div><div class=field><label>Port</label><input name=snmp_port value="{{d.snmp_port or 161}}"></div>
+<h3>Health Polling</h3>
+<div class=field>
+  <label>Poll Method</label>
+  <select name=poll_method>
+    {% for m in ['ICMP','TCP','UDP','ARP'] %}
+    <option value="{{m}}" {{'selected' if (d.poll_method or 'ICMP')==m}}>{{m}}</option>
+    {% endfor %}
+  </select>
+</div>
+<div class=field>
+  <label>Service Port</label>
+  <input name=poll_port type=number min=1 max=65535
+         value="{{d.poll_port or ''}}" placeholder="e.g. 443 or 11095">
+</div>
+<div class=field>
+  <label>ARP Interface</label>
+  <input name=arp_interface
+         value="{{d.arp_interface or ''}}" placeholder="e.g. enp12s0">
+</div>
+<div class=field>
+  <label>ARP Fallback</label>
+  <input style="width:auto" type=checkbox name=arp_fallback
+         {{'checked' if d.arp_fallback}}>
+  <span class=small>Use Layer-2 presence if primary polling fails</span>
+</div>
+
+<h3>Alerting</h3>
+<div class=field><label>Alert Group</label><select name=alert_group_id>
+<option value="">None</option>
+{% for g in alert_groups %}<option value="{{g.id}}" {{'selected' if d.alert_group_id==g.id}}>{{g.name}}</option>{% endfor %}
+</select></div>
+<p class=small style="margin-left:180px">Notifications are edge-triggered: one DOWN message and one CLEAR message. No repeat mail while state is unchanged.</p>
+
+<h3>Device Authentication / Topology</h3>
+<div class=field><label>SSH Enabled</label><input style="width:auto" type=checkbox name=ssh_enabled {{'checked' if d.ssh_enabled}}></div>
+<div class=field><label>SSH Username</label><input name=ssh_username value="{{d.ssh_username or ''}}"></div>
+<div class=field><label>SSH Password</label><input type=password name=ssh_password value="{{d.ssh_password or ''}}"></div>
+<div class=field><label>SSH Port</label><input name=ssh_port value="{{d.ssh_port or 22}}"></div>
+<div class=field><label>Management Role</label><select name=mgmt_role><option value="">Auto</option>{% for v in ['router','switch','firewall','ap','host','iot'] %}<option {{'selected' if d.mgmt_role==v}}>{{v}}</option>{% endfor %}</select></div>
+<div class=field><label>Adjacent To</label><select id=adjacent_to name=adjacent_to><option value="">Auto / Evidence</option>{% for n in adjacency_choices %}<option value="{{n.key}}" {{'selected' if d.adjacent_to==n.key}}>{{n.name}}{% if n.ip %} ({{n.ip}}){% endif %} · {{n.role}}</option>{% endfor %}</select></div>
+<div class=field><label>Adjacent Interface</label><select id=adjacent_interface name=adjacent_interface data-selected="{{d.adjacent_interface or ''}}"><option value="">Auto / Unknown</option>{% for x in adjacent_interfaces %}<option value="{{x.name}}" {{'selected' if d.adjacent_interface==x.name}}>{{x.name}}{% if x.ip %} · {{x.ip}}{% endif %}{% if x.status or x.protocol %} · {{x.status}}/{{x.protocol}}{% endif %}{% if x.description %} · {{x.description}}{% endif %}</option>{% endfor %}</select></div>
+<div class=field><label>Local Interface</label><select id=local_interface name=local_interface><option value="">Auto / Unknown</option>{% for x in local_interfaces %}<option value="{{x.name}}" {{'selected' if d.local_interface==x.name}}>{{x.name}}{% if x.ip %} · {{x.ip}}{% endif %}{% if x.status or x.protocol %} · {{x.status}}/{{x.protocol}}{% endif %}{% if x.description %} · {{x.description}}{% endif %}</option>{% endfor %}</select></div>
+<p class=small style="margin-left:180px">
+Manual adjacency overrides topology placement. Adjacent Interface is learned from the selected neighbor; Local Interface is this node's endpoint.
+<b>Local interfaces learned: {{local_interfaces|length}}</b>.
+{% if not local_interfaces %}Run <b>Collect Device Now</b> on this managed node to populate interface inventory.{% endif %}
+</p><div id=iface_error class=small style="margin-left:180px;color:#ff7b72"></div>
+<script>
+const adj=document.getElementById('adjacent_to'), ai=document.getElementById('adjacent_interface');
+function optText(x){let p=[x.name]; if(x.ip)p.push(x.ip); if(x.status||x.protocol)p.push((x.status||'?')+'/'+(x.protocol||'?')); if(x.description)p.push(x.description); return p.join(' · ')}
+async function loadAdjacentInterfaces(preserve){
+  const key=adj.value, selected=preserve ? (ai.dataset.selected||ai.value) : '';
+  ai.innerHTML='<option value="">Auto / Unknown</option>';
+  if(!key) return;
+  try {
+    const r=await fetch('/api/device-by-key/interfaces?key='+encodeURIComponent(key));
+    const rows=await r.json();
+    rows.forEach(x=>{const o=document.createElement('option');o.value=x.name;o.textContent=optText(x);if(x.name===selected)o.selected=true;ai.appendChild(o)});
+  } catch(e) { console.error('interface inventory load failed',e); document.getElementById('iface_error').textContent='Could not load adjacent interface inventory: '+e; }
+}
+adj.addEventListener('change',()=>loadAdjacentInterfaces(false));
+if(adj.value) loadAdjacentInterfaces(true);
+</script>
+<div class=field><label>Notes</label><textarea name=notes>{{d.notes or ''}}</textarea></div><button>💾 Save Node</button></form>
+<hr style="border-color:#333;margin:20px 0"><h3>Authentication / Collection Actions</h3>
+<div style="display:flex;gap:10px;flex-wrap:wrap">
+<form method=post action="/device/{{d.id}}/test-auth"><button>🔐 Test SSH Authentication</button></form>
+<form method=post action="/device/{{d.id}}/collect"><button>📡 Collect Device Now</button></form>
+</div>
+<div class=card style="margin-top:15px">
+<b>Authentication:</b> <span class="{{d.auth_status or ''}}">{{d.auth_status or 'NOT TESTED'}}</span><br>
+<b>Detail:</b> {{d.auth_detail or '—'}}<br>
+<b>Last Collection:</b> {{d.last_collection or 'Never'}}<br>
+<b>Detected Type:</b> {{d.device_type or 'Unknown'}}
+{% if d.platform_info %}<details style="margin-top:10px"><summary>Platform evidence</summary><pre style="white-space:pre-wrap">{{d.platform_info}}</pre></details>{% endif %}
+</div></div>
+<div class=card><h2>Recent Node Evidence</h2><p class=small>CLI-* rows preserve raw command output; N/A means unsupported by the device.</p><table>{% for e in evidence %}<tr><td>{{e.ts}}</td><td>{{e.check_type}}</td><td class={{e.status}}>{{e.status}}</td><td>{{e.value or ""}}</td><td>{{e.detail or ""}}</td></tr>{% endfor %}</table></div>{% endblock %}

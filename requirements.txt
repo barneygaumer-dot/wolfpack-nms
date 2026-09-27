@@ -1,0 +1,4 @@
+Flask>=3.0,<4
+waitress>=3.0,<4
+pysnmp>=7.1,<8
+paramiko>=3.5,<5

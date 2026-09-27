@@ -1,0 +1,651 @@
+{% extends "base.html" %}{% block body %}
+<div class="card topology-header">
+  <h2>Network Topology</h2>
+  <form method=post>
+    <button>🔎 Refresh L2/L3 Topology</button>
+  </form>
+</div>
+<div class="card canvas"><svg id=wire></svg><div id=tree></div></div>
+<style>
+.topology-header{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:20px;
+  padding-top:10px;
+  padding-bottom:10px
+}
+.topology-header h2{margin:0}
+.topology-header form{margin:0}
+.canvas{position:relative;min-height:700px;overflow:auto;padding:32px}
+#wire{position:absolute;inset:0;width:100%;height:100%;z-index:0;pointer-events:none}#tree{position:relative;z-index:1;min-width:980px}
+.layer{display:flex;justify-content:center;gap:100px;margin:15px 0 75px;flex-wrap:wrap}.wrap{text-align:center;min-width:160px;position:relative}
+.node{width:78px;height:62px;margin:auto;border:3px solid #62e693;background:#191919;display:flex;align-items:center;justify-content:center;transition:.15s}
+a.node-link{color:inherit;text-decoration:none;display:block}a.node-link:hover .node{filter:brightness(1.35);transform:scale(1.05)}
+.router{border-radius:50%}
+.firewall{
+  border-radius:9px;
+  clip-path:none;
+  width:92px;
+  height:62px;
+}
+.switch{border-radius:9px}
+.ap{border-radius:50% 50% 12px 12px}
+.host,.iot{border-color:#999;border-radius:9px}
+.icon{font-size:29px}.name{font-weight:700;margin-top:8px}.meta{font-size:12px;color:#aaa}.groups{
+  display:flex;
+  justify-content:center;
+  align-items:flex-start;
+  gap:24px;
+  flex-wrap:wrap;
+  margin-top:15px
+}
+.cloud{
+  position:relative;
+  min-width:310px;
+  max-width:560px;
+  width:max-content;
+  align-self:flex-start;
+  box-sizing:border-box;
+  border:2px dashed #6f9fc7;
+  border-radius:28px;
+  padding:14px 20px;
+  background:#171b1f;
+}
+
+.cloud[open]{
+  width:auto;
+  min-width:310px;
+  max-width:560px;
+}
+
+.cloud:not([open]){
+  width:auto;
+  min-width:310px;
+}
+.cloud summary{cursor:pointer;font-weight:750;text-align:center;list-style:none}.cloud summary::-webkit-details-marker{display:none}.cloud summary:before{content:'☁  ';font-size:22px}.cloud[open]{border-radius:28px}
+.members{
+  display:grid;
+  grid-template-columns:repeat(10,minmax(105px,1fr));
+  gap:7px;
+  margin-top:14px
+}
+.member{
+  font-size:12px;
+  border:1px solid #46515b;
+  border-radius:7px;
+  padding:7px;
+  background:#1d2227
+}
+
+@media (max-width:1400px){
+  .members{
+    grid-template-columns:repeat(5,minmax(105px,1fr));
+  }
+}
+
+@media (max-width:850px){
+  .members{
+    grid-template-columns:repeat(2,minmax(105px,1fr));
+  }
+}
+
+/* Expanded evidence clouds may grow horizontally. */
+.cloud[open]{
+  width:max-content;
+  min-width:310px;
+  max-width:none;
+}
+
+/* Visual AP/interface -> segment-cloud attachment. */
+.cloud-anchor{
+  position:absolute;
+  width:0;
+  height:0;
+  pointer-events:none;
+}
+
+.cloud-link{
+  stroke:#62c9ff;
+  stroke-width:3;
+  fill:none;
+}
+
+/*
+ * Segment clouds are topology children of their source node.
+ * Keep the collapsed cloud close enough to visually read as
+ * AP -> interface/segment.
+ */
+.attached-groups{
+  margin-top:-45px;
+  margin-bottom:65px;
+  justify-content:center;
+}
+
+/*
+ * Expansion stays centered and may use the available horizontal
+ * canvas for our ten-column member layout.
+ */
+.attached-groups .cloud[open]{
+  max-width:none;
+  width:max-content;
+}
+
+/* Orphan evidence remains separated from normal topology. */
+.orphan-groups{
+  margin-top:30px;
+}
+.member a{display:block;color:#dce8f3;text-decoration:none}.member:hover{border-color:#8ab4f8;background:#252d35}
+
+/* -------------------------------------------------------
+   Node operational-state presentation
+   ------------------------------------------------------- */
+.node{
+  position:relative;
+}
+
+.node.state-up{
+  border-color:#39e58c;
+  box-shadow:0 0 0 1px rgba(57,229,140,.15);
+}
+
+.node.state-down{
+  border-color:#ff474f;
+  box-shadow:0 0 0 1px rgba(255,71,79,.18);
+}
+
+.node.state-unknown{
+  border-color:#aaa;
+}
+
+.status-dot{
+  position:absolute;
+  width:13px;
+  height:13px;
+  border-radius:50%;
+  top:7px;
+  right:7px;
+  border:1px solid rgba(255,255,255,.18);
+}
+
+.status-dot.up{background:#39e58c}
+.status-dot.down{background:#ff474f}
+.status-dot.unknown{background:#aaa}
+
+/* Cloud member health */
+.member{
+  position:relative;
+  padding-left:29px;
+}
+
+.member-status{
+  position:absolute;
+  width:12px;
+  height:12px;
+  border-radius:50%;
+  left:10px;
+  top:50%;
+  transform:translateY(-50%);
+}
+
+.member-status.up{background:#39e58c}
+.member-status.down{background:#ff474f}
+.member-status.unknown{background:#aaa}
+
+/* Cloud itself remains evidence-colored, not health-colored. */
+.cloud{
+  border-radius:28px;
+}
+
+/* Explicitly kill the old racetrack geometry even when closed. */
+.cloud:not([open]){
+  border-radius:28px;
+}
+
+.tip{position:fixed;display:none;z-index:20;background:#090909;border:1px solid #666;border-radius:7px;padding:9px 11px;max-width:340px;font-size:12px;box-shadow:0 6px 22px #000;pointer-events:none}
+</style>
+<div id=tip class=tip></div>
+<script>
+const T={{topology|tojson}}, tree=document.getElementById("tree");
+const I={router:"⇄",firewall:"🛡",switch:"▦",ap:"⌁",host:"▣",iot:"◉",network:"◆"};
+const N=Object.fromEntries(T.nodes.map(n=>[n.key||n.ip,n]));
+const infra=new Set(["router","firewall","switch","ap","network"]);
+
+/*
+ * Nodes represented inside an observed segment cloud must not also
+ * appear as standalone topology objects.
+ *
+ * Infrastructure is intentionally exempt: a router/AP/etc may be
+ * observed in evidence without disappearing from the infrastructure
+ * topology.
+ */
+const groupedNodes=new Set();
+
+T.groups.forEach(g=>{
+  (g.members||[]).forEach(ip=>{
+    const n=N[ip];
+    if(!n || !infra.has(n.role))
+      groupedNodes.add(ip);
+  });
+});
+
+/*
+ * Build a DISPLAY graph independently from the evidence graph.
+ *
+ * Firewalls normally represent the upstream/WAN side of a router.
+ * A configured router -> firewall relationship therefore renders
+ * firewall -> router without changing the actual stored adjacency.
+ */
+let displayLinks=T.links.map(l=>{
+  const sn=N[l.source], tn=N[l.target];
+
+  if (
+    tn &&
+    tn.role==="firewall" &&
+    l.confidence==="CONFIGURED"
+  ){
+    return {...l,source:l.target,target:l.source,_displayReversed:true};
+  }
+
+  return {...l};
+});
+
+/*
+ * DISPLAY GRAPH NORMALIZATION
+ *
+ * Synthetic segment nodes are evidence aggregation points, not physical
+ * devices.  When a segment has the real router as one of its children,
+ * promote the other segment members beneath that router for display.
+ *
+ * Example:
+ *
+ *   segment:10.23.10.1:gi0/1
+ *        +-- 10.23.10.1       SkyNet-Core-rtr
+ *        +-- 10.23.10.102     penguin-1p
+ *        +-- 10.23.10.2       SkyNet-AP
+ *        +-- 10.23.10.89      Tablo
+ *
+ * becomes, DISPLAY ONLY:
+ *
+ *   10.23.10.1
+ *        +-- 10.23.10.102
+ *        +-- 10.23.10.2
+ *        +-- 10.23.10.89
+ *
+ * Stored topology/evidence is untouched.
+ */
+const collapsedDisplayNodes=new Set();
+
+const syntheticSegments=new Set(
+  displayLinks
+    .flatMap(l=>[l.source,l.target])
+    .filter(k=>String(k||"").startsWith("segment:"))
+);
+
+syntheticSegments.forEach(seg=>{
+  const childLinks=displayLinks.filter(l=>l.source===seg);
+
+  /*
+   * Prefer an infrastructure router observed on this segment as the
+   * display parent.
+   */
+  const routerLink=childLinks.find(l=>{
+    const n=N[l.target];
+    return n && n.role==="router";
+  });
+
+  if(!routerLink)
+    return;
+
+  const routerKey=routerLink.target;
+
+  collapsedDisplayNodes.add(seg);
+
+  const promoted=childLinks
+    .filter(l=>l.target!==routerKey)
+    .map(l=>({
+      ...l,
+      source:routerKey,
+      _displayCollapsed:true
+    }));
+
+  /*
+   * Remove all display links touching the synthetic segment.
+   */
+  displayLinks=displayLinks.filter(
+    l=>l.source!==seg && l.target!==seg
+  );
+
+  /*
+   * Add router -> segment-member display relationships.
+   */
+  promoted.forEach(l=>{
+    if(!displayLinks.some(
+      x=>x.source===l.source && x.target===l.target
+    )){
+      displayLinks.push(l);
+    }
+  });
+});
+
+const incoming=new Set(displayLinks.map(x=>x.target));
+const C={};
+
+displayLinks.forEach(x=>(C[x.source]??=[]).push(x));
+
+let levels=[],seen=new Set();
+
+function walk(ip,d){
+  if(seen.has(ip)||!N[ip]) return;
+
+  seen.add(ip);
+  (levels[d]??=[]).push(N[ip]);
+
+  (C[ip]||[]).forEach(x=>walk(x.target,d+1));
+}
+
+T.nodes
+ .filter(n=>infra.has(n.role)&&!incoming.has(n.key||n.ip))
+ .forEach(n=>walk(n.key||n.ip,0));
+
+T.nodes
+ .filter(n=>infra.has(n.role)&&!seen.has(n.key||n.ip))
+ .forEach(n=>walk(n.key||n.ip,0));
+function stateOf(n){
+  let s=String((n&&n.status)||"unknown").trim().toLowerCase();
+
+  if(["up","online","alive","reachable","healthy"].includes(s))
+    return "up";
+
+  if(["down","offline","dead","unreachable","failed"].includes(s))
+    return "down";
+
+  return "unknown";
+}
+
+function details(n){
+  return `${n.name}\nIP: ${n.ip||'virtual/inferred'}\nRole: ${n.role}\nStatus: ${n.status||'unknown'}${n.device_id?'\nClick to configure':''}`;
+}
+
+function card(n){
+  let w=document.createElement("div");
+  let state=stateOf(n);
+
+  w.className="wrap hot";
+  w.dataset.ip=n.key||n.ip;
+  w.dataset.tip=details(n);
+
+  let href=n.device_id?`/device/${n.device_id}`:"#";
+
+  w.innerHTML=`
+    <a class=node-link href="${href}">
+      <div class="node ${n.role} state-${state}">
+        <span class="status-dot ${state}"></span>
+        <span class=icon>${I[n.role]||"□"}</span>
+      </div>
+      <div class=name>${n.name}</div>
+      <div class=meta>
+        ${n.ip?n.ip+" · ":""}${n.role.toUpperCase()}
+        ${n.status==="inferred"?" · INFERRED":""}
+      </div>
+    </a>`;
+
+  return w;
+}
+/*
+ * Render the infrastructure topology and attach observed segment
+ * clouds directly beneath their source node.
+ *
+ * Example:
+ *
+ *     SkyNet-AP
+ *         |
+ *       BVI1
+ *         |
+ *     [members]
+ *
+ * Groups no longer live in one global container at the bottom.
+ */
+
+const groupsBySource={};
+
+T.groups.forEach(g=>{
+  (groupsBySource[g.source]??=[]).push(g);
+});
+
+function cloudCard(g){
+  let d=document.createElement("details");
+
+  d.className="cloud";
+  d.dataset.source=g.source||"";
+  d.dataset.interface=g.interface||"";
+
+  let src=N[g.source];
+
+  d.innerHTML=`
+    <summary>${src?src.name+' · ':''}${g.interface} · ${g.members.length} nodes</summary>
+    <div class=members>
+      ${g.members.map(ip=>{
+        let n=N[ip]||{name:ip,ip,role:'host',status:'unknown'};
+        let href=n.device_id?`/device/${n.device_id}`:'#';
+        let state=stateOf(n);
+
+        return `
+          <div class="member hot"
+               data-tip="${details(n).replaceAll('"','&quot;')}">
+            <span class="member-status ${state}"></span>
+            <a href="${href}">
+              <b>${n.name||ip}</b><br>
+              <span class=meta>${ip} · ${(n.role||'host').toUpperCase()}</span>
+            </a>
+          </div>`;
+      }).join("")}
+    </div>`;
+
+  return d;
+}
+
+levels.forEach(L=>{
+  let visible=L.filter(n=>
+    !groupedNodes.has(n.key||n.ip) &&
+    !collapsedDisplayNodes.has(n.key||n.ip)
+  );
+
+  if(!visible.length) return;
+
+  let r=document.createElement("div");
+  r.className="layer";
+
+  /*
+   * Keep an AP centered in its topology layer.
+   * Other siblings remain dynamically distributed around it.
+   */
+  const ap=visible.find(n=>n.role==="ap");
+
+  if(ap && visible.length>1){
+    const others=visible.filter(n=>n!==ap);
+    const middle=Math.floor(visible.length/2);
+
+    others.splice(middle,0,ap);
+    visible=others;
+  }
+
+  visible.forEach(n=>r.appendChild(card(n)));
+
+  tree.appendChild(r);
+
+  /*
+   * Attach segment clouds immediately beneath the topology layer
+   * containing their source node.
+   */
+  let sourceGroups=[];
+
+  visible.forEach(n=>{
+    let key=n.key||n.ip;
+
+    (groupsBySource[key]||[]).forEach(g=>{
+      sourceGroups.push(g);
+    });
+  });
+
+  if(sourceGroups.length){
+    let gr=document.createElement("div");
+    gr.className="groups attached-groups";
+
+    sourceGroups.forEach(g=>{
+      gr.appendChild(cloudCard(g));
+    });
+
+    tree.appendChild(gr);
+  }
+});
+
+/*
+ * Safety net:
+ * If a group references a source that did not render in the
+ * infrastructure tree, don't lose the evidence. Put those groups
+ * at the bottom instead.
+ */
+let renderedSources=new Set();
+
+levels.forEach(L=>{
+  L.forEach(n=>{
+    if(!groupedNodes.has(n.key||n.ip))
+      renderedSources.add(n.key||n.ip);
+  });
+});
+
+let orphanGroups=T.groups.filter(g=>!renderedSources.has(g.source));
+
+if(orphanGroups.length){
+  let gr=document.createElement("div");
+  gr.className="groups orphan-groups";
+
+  orphanGroups.forEach(g=>{
+    gr.appendChild(cloudCard(g));
+  });
+
+  tree.appendChild(gr);
+}
+function draw(){
+  let svg=document.getElementById("wire"),
+      box=svg.parentElement.getBoundingClientRect();
+
+  svg.innerHTML="";
+
+  /*
+   * Draw one relationship from a segment's source infrastructure
+   * node to its evidence cloud. This replaces individual spaghetti
+   * links for grouped clients.
+   */
+  document.querySelectorAll(".cloud[data-source]").forEach(cloud=>{
+    const source=cloud.dataset.source;
+    if(!source) return;
+
+    const src=document.querySelector(`[data-ip="${source}"] .node`);
+    if(!src) return;
+
+    const a=src.getBoundingClientRect();
+    const b=cloud.getBoundingClientRect();
+
+    const x1=a.left+a.width/2-box.left;
+    const y1=a.bottom-box.top;
+
+    /*
+     * Keep source -> observed-segment attachment vertical.
+     * The cloud may expand horizontally, but its logical attachment
+     * remains directly beneath the source node.
+     */
+    const x2=x1;
+    const y2=b.top-box.top;
+
+    const q=document.createElementNS(
+      "http://www.w3.org/2000/svg","line"
+    );
+
+    q.setAttribute("x1",x1);
+    q.setAttribute("y1",y1);
+    q.setAttribute("x2",x2);
+    q.setAttribute("y2",y2);
+    q.setAttribute("class","cloud-link");
+
+    svg.appendChild(q);
+  });
+
+  displayLinks.forEach(l=>{
+    let s=document.querySelector(`[data-ip="${l.source}"] .node`),
+        t=document.querySelector(`[data-ip="${l.target}"] .node`);
+
+    if(!s||!t) return;
+
+    let a=s.getBoundingClientRect(),
+        b=t.getBoundingClientRect(),
+        x1=a.left+a.width/2-box.left,
+        y1=a.bottom-box.top,
+        x2=b.left+b.width/2-box.left,
+        y2=b.top-box.top;
+
+    let q=document.createElementNS("http://www.w3.org/2000/svg","line");
+
+    [["x1",x1],["y1",y1],["x2",x2],["y2",y2]]
+      .forEach(v=>q.setAttribute(v[0],v[1]));
+
+    q.setAttribute("stroke","#7dd3fc");
+    q.setAttribute("stroke-width","3");
+
+    if(l.confidence==="INFERRED")
+      q.setAttribute("stroke-dasharray","8 7");
+
+    svg.appendChild(q);
+
+    let label="";
+
+    if(l.evidence==="MANUAL"){
+      label=l.label||"Configured";
+    }else{
+      label=l.evidence||"";
+      if(l.label)
+        label+=(label?" · ":"")+l.label;
+    }
+
+    if(!label) return;
+
+    let mx=(x1+x2)/2,
+        my=(y1+y2)/2;
+
+    /*
+     * Small background behind edge text keeps labels readable
+     * when a cable passes through nearby metadata.
+     */
+    let bg=document.createElementNS(
+      "http://www.w3.org/2000/svg","rect"
+    );
+
+    let width=Math.max(55,label.length*6.2+12);
+
+    bg.setAttribute("x",mx-width/2);
+    bg.setAttribute("y",my-17);
+    bg.setAttribute("width",width);
+    bg.setAttribute("height","19");
+    bg.setAttribute("rx","5");
+    bg.setAttribute("fill","#191919");
+    bg.setAttribute("opacity",".92");
+
+    svg.appendChild(bg);
+
+    let tx=document.createElementNS(
+      "http://www.w3.org/2000/svg","text"
+    );
+
+    tx.setAttribute("x",mx);
+    tx.setAttribute("y",my-4);
+    tx.setAttribute("text-anchor","middle");
+    tx.setAttribute("fill","#aaa");
+    tx.setAttribute("font-size","11");
+    tx.textContent=label;
+
+    svg.appendChild(tx);
+  });
+}
+const tip=document.getElementById('tip');document.addEventListener('mousemove',e=>{let h=e.target.closest('.hot');if(!h){tip.style.display='none';return}tip.textContent=h.dataset.tip||'';tip.style.display='block';tip.style.left=(e.clientX+14)+'px';tip.style.top=(e.clientY+14)+'px'}); document.querySelectorAll('.cloud').forEach(x=>x.addEventListener('toggle',()=>setTimeout(draw,30)));setTimeout(draw,80);addEventListener("resize",draw);
+</script>{% endblock %}
